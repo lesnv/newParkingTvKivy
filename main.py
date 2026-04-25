@@ -14,6 +14,7 @@ from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.gridlayout import GridLayout
+from kivy.uix.widget import Widget
 from kivy.uix.filechooser import FileChooserListView
 from kivy.clock import Clock
 from kivy.graphics import Color, Rectangle
@@ -27,6 +28,7 @@ DEFAULT_PASS = ""
 DEFAULT_INTERVAL = 5
 DEFAULT_CAMERAS = []
 DEFAULT_FONT_SIZE = 150
+DEFAULT_HEADER_FONT_SIZE = 40
 DEFAULT_BG_COLOR = "000000"
 DEFAULT_TEXT_COLOR = "FFFFFF"
 DEFAULT_BG_IMAGE = ""
@@ -47,8 +49,9 @@ class SettingsManager:
         self.config = {
             'api_url': DEFAULT_API_URL, 'user': DEFAULT_USER, 'pass': DEFAULT_PASS,
             'interval': DEFAULT_INTERVAL, 'cameras': DEFAULT_CAMERAS,
-            'font_size': DEFAULT_FONT_SIZE, 'bg_color': DEFAULT_BG_COLOR,
-            'text_color': DEFAULT_TEXT_COLOR, 'bg_image': DEFAULT_BG_IMAGE
+            'font_size': DEFAULT_FONT_SIZE, 'header_font_size': DEFAULT_HEADER_FONT_SIZE,
+            'bg_color': DEFAULT_BG_COLOR, 'text_color': DEFAULT_TEXT_COLOR,
+            'bg_image': DEFAULT_BG_IMAGE
         }
         self.load_config()
 
@@ -91,7 +94,7 @@ def hex_to_rgba(hex_color, alpha=1.0):
     if len(hex_color) != 6:
         return [0, 0, 0, alpha]
     try:
-        return [int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4)] + [alpha]
+        return [int(hex_color[i:i+2], 16)/255 for i in (0, 2, 4)] + [alpha]
     except ValueError:
         return [0, 0, 0, alpha]
 
@@ -107,7 +110,7 @@ class ColorPickerPopup(Popup):
         grid.bind(minimum_height=grid.setter('height'))
         for hex_val, name in COLOR_PRESETS:
             btn = Button(text="", background_color=hex_to_rgba(hex_val),
-                         background_normal='', size_hint_y=None, height=60)
+                        background_normal='', size_hint_y=None, height=60)
             btn.bind(on_release=lambda btn, h=hex_val: self._select(h))
             grid.add_widget(btn)
         scroll = ScrollView()
@@ -131,7 +134,6 @@ class ApiClient:
 
     def _request_new_token(self):
         try:
-            # === УЛУЧШЕНИЕ: безопасное получение URL ===
             base_url = (settings.get('api_url') or DEFAULT_API_URL).strip()
             if not base_url:
                 base_url = DEFAULT_API_URL
@@ -184,43 +186,35 @@ class MainScreen(Screen):
         super().__init__(**kwargs)
         self.api_client = ApiClient()
         self.update_scheduled = None
-        self._current_camera_idx = 0
         self._bg_color_instr = None
         self._bg_rect = None
         self._bg_initialized = False
 
-        self.lbl_header = Label(text="", font_size='40sp', bold=True,
-                                color=hex_to_rgba(settings.get('text_color', DEFAULT_TEXT_COLOR)),
-                                halign='center', valign='middle', size_hint_y=None, height=50)
-        self.lbl_count = Label(text="...",
-                               font_size=f"{settings.get('font_size', DEFAULT_FONT_SIZE)}sp", bold=True,
-                               color=hex_to_rgba(settings.get('text_color', DEFAULT_TEXT_COLOR)),
-                               halign='center', valign='middle')
-        self.lbl_status = Label(text="Загрузка...", font_size='20sp',
-                                color=hex_to_rgba(settings.get('text_color', DEFAULT_TEXT_COLOR)),
-                                size_hint_y=None, height=35)
+        main_layout = BoxLayout(orientation='vertical', padding=15, spacing=10)
 
-        nav_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
-        self.btn_prev_camera = Button(text="◀", font_size='20sp', size_hint_x=None, width=60)
-        self.btn_next_camera = Button(text="▶", font_size='20sp', size_hint_x=None, width=60)
-        self.lbl_camera_info = Label(text="Камера 1/1", font_size='16sp',
-                                     color=hex_to_rgba(settings.get('text_color', DEFAULT_TEXT_COLOR)))
-        self.btn_prev_camera.bind(on_release=self.prev_camera)
-        self.btn_next_camera.bind(on_release=self.next_camera)
-        nav_layout.add_widget(self.btn_prev_camera)
-        nav_layout.add_widget(self.lbl_camera_info)
-        nav_layout.add_widget(self.btn_next_camera)
+        self.cameras_scroll = ScrollView(size_hint=(1, 1))
+        self.cameras_container = BoxLayout(orientation='vertical', spacing=10, size_hint_y=None)
+        self.cameras_container.bind(minimum_height=self.cameras_container.setter('height'))
+
+        # Спейсеры для вертикального центрирования
+        self.top_spacer = Widget(size_hint_y=1)
+        self.bottom_spacer = Widget(size_hint_y=1)
+        self.cameras_container.add_widget(self.top_spacer)
+        self.cameras_container.add_widget(self.bottom_spacer)
+
+        self.cameras_scroll.add_widget(self.cameras_container)
+        main_layout.add_widget(self.cameras_scroll)
+
+        self.lbl_status = Label(text="Загрузка...", font_size='18sp',
+                                color=hex_to_rgba(settings.get('text_color', DEFAULT_TEXT_COLOR)),
+                                size_hint_y=None, height=30, halign='center')
+        main_layout.add_widget(self.lbl_status)
 
         self.btn_settings = Button(text="⚙ Настройки", size_hint_y=None, height=50, font_size='20sp')
         self.btn_settings.bind(on_release=self.go_to_settings)
+        main_layout.add_widget(self.btn_settings)
 
-        layout = BoxLayout(orientation='vertical', padding=15, spacing=15)
-        layout.add_widget(self.lbl_header)
-        layout.add_widget(self.lbl_count)
-        layout.add_widget(self.lbl_status)
-        layout.add_widget(nav_layout)
-        layout.add_widget(self.btn_settings)
-        self.add_widget(layout)
+        self.add_widget(main_layout)
 
         Clock.schedule_once(self._init_canvas_background, 0)
 
@@ -238,7 +232,7 @@ class MainScreen(Screen):
         self._apply_bg_settings()
 
     def _update_bg_rect(self, *args):
-        if self._bg_initialized and self._bg_rect:
+        if self._bg_rect:
             self._bg_rect.pos = self.pos
             self._bg_rect.size = self.size
 
@@ -272,7 +266,6 @@ class MainScreen(Screen):
             self._apply_bg_settings()
         else:
             Clock.schedule_once(lambda dt: self._apply_bg_settings(), 0.05)
-        self._update_camera_info()
         self._start_polling()
 
     def on_leave(self, *args):
@@ -295,40 +288,42 @@ class MainScreen(Screen):
     def _fetch_data(self):
         cameras = settings.get('cameras', [])
         if not cameras:
-            self._schedule_ui_update(self._set_status, "Добавьте камеру в настройках")
+            self._schedule_ui_update(self._set_status, "Добавьте камеры в настройках")
+            self._schedule_ui_update(self._update_cameras_list, [])
             return
-        if self._current_camera_idx >= len(cameras):
-            self._current_camera_idx = 0
-        camera = cameras[self._current_camera_idx]
-        camera_number = camera.get('number', '').strip()
-        header = camera.get('header', '').strip()
-        if not camera_number:
-            self._schedule_ui_update(self._set_status, "Укажите номер камеры")
-            return
-        self._schedule_ui_update(setattr, self.lbl_header, 'text', header)
-        # === УЛУЧШЕНИЕ: безопасное получение URL ===
+
         api_url = (settings.get('api_url') or DEFAULT_API_URL).strip()
         if not api_url:
             api_url = DEFAULT_API_URL
-        report_url = f"{api_url}/api/v0/analytics/parking_detection/report/"
-        now = datetime.now(timezone.utc)
-        payload = {
-            "page": 1, "page_size": 1,
-            "start": (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "end": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "query": "", "ordering": [{"sort": "id", "order": "DESC"}],
-            "camera_number": camera_number
-        }
-        data, error = self.api_client.make_request(report_url, payload)
-        if error:
-            self._schedule_ui_update(self._set_status, error)
-            return
-        display_text = self._parse_response(data)
-        if display_text is not None:
-            now_str = datetime.now().strftime("%H:%M:%S")
-            self._schedule_ui_update(self._update_ui, str(display_text), now_str)
-        else:
-            self._schedule_ui_update(self._set_status, "Нет данных")
+
+        camera_results = []
+        for cam in cameras:
+            number = cam.get('number', '').strip()
+            header = cam.get('header', '').strip()
+            if not number:
+                continue
+
+            report_url = f"{api_url}/api/v0/analytics/parking_detection/report/"
+            now = datetime.now(timezone.utc)
+            payload = {
+                "page": 1, "page_size": 1,
+                "start": (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "end": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "query": "", "ordering": [{"sort": "id", "order": "DESC"}],
+                "camera_number": number
+            }
+            data, error = self.api_client.make_request(report_url, payload)
+            if error:
+                val = error
+            else:
+                val = self._parse_response(data)
+                if val is None:
+                    val = "Нет данных"
+                else:
+                    val = str(val)
+            camera_results.append((header, val))
+
+        self._schedule_ui_update(self._update_cameras_list, camera_results)
 
     def _parse_response(self, data):
         if isinstance(data, dict):
@@ -353,33 +348,53 @@ class MainScreen(Screen):
                 return str(first)
         return None
 
+    def _update_cameras_list(self, camera_results):
+        """Перестраивает список камер с вертикальным центрированием."""
+        # Удаляем все блоки камер, оставляя только спейсеры
+        children = self.cameras_container.children[:]
+        for child in children:
+            if child is not self.top_spacer and child is not self.bottom_spacer:
+                self.cameras_container.remove_widget(child)
+
+        header_font = settings.get('header_font_size', DEFAULT_HEADER_FONT_SIZE)
+        value_font = settings.get('font_size', DEFAULT_FONT_SIZE)
+        text_color = hex_to_rgba(settings.get('text_color', DEFAULT_TEXT_COLOR))
+
+        # Добавляем блоки перед bottom_spacer, чтобы они оказались между спейсерами
+        for header, value in camera_results:
+            block = BoxLayout(orientation='vertical', spacing=5, size_hint_y=None, height=150)
+            lbl_header = Label(
+                text=header,
+                font_size=f"{header_font}sp",
+                bold=True,
+                color=text_color,
+                halign='center', valign='middle',
+                size_hint_y=None, height=60,
+                text_size=(None, None)
+            )
+            lbl_value = Label(
+                text=value,
+                font_size=f"{value_font}sp",
+                bold=True,
+                color=text_color,
+                halign='center', valign='middle',
+                size_hint_y=None, height=80,
+                text_size=(None, None)
+            )
+            # Обеспечиваем перенос текста по ширине
+            lbl_header.bind(size=lambda inst, sz, lbl=lbl_header: setattr(lbl, 'text_size', (sz[0], None)))
+            lbl_value.bind(size=lambda inst, sz, lbl=lbl_value: setattr(lbl, 'text_size', (sz[0], None)))
+            block.add_widget(lbl_header)
+            block.add_widget(lbl_value)
+
+            # Вставляем перед bottom_spacer (используем индекс = len(children)-1)
+            self.cameras_container.add_widget(block, index=len(self.cameras_container.children) - 1)
+
+        now_str = datetime.now().strftime("%H:%M:%S")
+        self.lbl_status.text = f"Обновлено: {now_str}"
+
     def _set_status(self, text):
         self.lbl_status.text = text
-
-    def _update_ui(self, display_text, timestamp):
-        self.lbl_count.text = str(display_text)
-        self.lbl_status.text = f"Обновлено: {timestamp}"
-
-    def prev_camera(self, instance):
-        cameras = settings.get('cameras', [])
-        if cameras:
-            self._current_camera_idx = (self._current_camera_idx - 1) % len(cameras)
-            self._update_camera_info()
-
-    def next_camera(self, instance):
-        cameras = settings.get('cameras', [])
-        if cameras:
-            self._current_camera_idx = (self._current_camera_idx + 1) % len(cameras)
-            self._update_camera_info()
-
-    def _update_camera_info(self):
-        cameras = settings.get('cameras', [])
-        if cameras and self._current_camera_idx < len(cameras):
-            cam = cameras[self._current_camera_idx]
-            name = cam.get('name', cam.get('number', '?'))
-            self.lbl_camera_info.text = f"{name} ({self._current_camera_idx + 1}/{len(cameras)})"
-        else:
-            self.lbl_camera_info.text = "Нет камер"
 
     def go_to_settings(self, instance):
         self.manager.current = 'settings'
@@ -400,12 +415,12 @@ class SettingsScreen(Screen):
         self._content.bind(minimum_height=self._content.setter('height'))
 
         self._content.add_widget(Label(text="🔐 Авторизация", size_hint_y=None, height=35, bold=True, font_size='16sp'))
-        self.input_url = TextInput(hint_text="URL API", text=settings.get('api_url', ''), multiline=False,
-                                   font_size='14sp', size_hint_y=None, height=40)
-        self.input_user = TextInput(hint_text="Логин", text=settings.get('user', ''), multiline=False, font_size='14sp',
-                                    size_hint_y=None, height=40)
-        self.input_pass = TextInput(hint_text="Пароль", text=settings.get('pass', ''), password=True, multiline=False,
-                                    font_size='14sp', size_hint_y=None, height=40)
+        self.input_url = TextInput(hint_text="URL API", text=settings.get('api_url', ''),
+            multiline=False, font_size='14sp', size_hint_y=None, height=40, size_hint_x=1)
+        self.input_user = TextInput(hint_text="Логин", text=settings.get('user', ''),
+            multiline=False, font_size='14sp', size_hint_y=None, height=40, size_hint_x=1)
+        self.input_pass = TextInput(hint_text="Пароль", text=settings.get('pass', ''),
+            password=True, multiline=False, font_size='14sp', size_hint_y=None, height=40, size_hint_x=1)
         self._content.add_widget(self.input_url)
         self._content.add_widget(self.input_user)
         self._content.add_widget(self.input_pass)
@@ -418,39 +433,51 @@ class SettingsScreen(Screen):
         btn_add.bind(on_release=self.add_camera_row)
         self._content.add_widget(btn_add)
 
-        self._content.add_widget(Label(text="⚙ Общие", size_hint_y=None, height=35, bold=True, font_size='16sp'))
-        self.input_interval = TextInput(hint_text="Интервал (сек)",
-                                        text=str(settings.get('interval', DEFAULT_INTERVAL)), input_filter='int',
-                                        multiline=False, font_size='14sp', size_hint_y=None, height=40)
-        self.input_font = TextInput(hint_text="Размер шрифта", text=str(settings.get('font_size', DEFAULT_FONT_SIZE)),
-                                    input_filter='int', multiline=False, font_size='14sp', size_hint_y=None, height=40)
-        self._content.add_widget(self.input_interval)
+        self._content.add_widget(Label(text="⚙ Размеры шрифтов", size_hint_y=None, height=35, bold=True, font_size='16sp'))
+        self.input_font = TextInput(hint_text="Шрифт текста",
+            text=str(settings.get('font_size', DEFAULT_FONT_SIZE)),
+            input_filter='int', multiline=False, font_size='14sp', size_hint_y=None, height=40, size_hint_x=1)
+        self.input_header_font = TextInput(hint_text="Шрифт заголовка",
+            text=str(settings.get('header_font_size', DEFAULT_HEADER_FONT_SIZE)),
+            input_filter='int', multiline=False, font_size='14sp', size_hint_y=None, height=40, size_hint_x=1)
         self._content.add_widget(self.input_font)
+        self._content.add_widget(self.input_header_font)
+
+        self._content.add_widget(Label(text="🔄 Интервал обновления", size_hint_y=None, height=35, bold=True, font_size='16sp'))
+        self.input_interval = TextInput(hint_text="Интервал (сек)",
+            text=str(settings.get('interval', DEFAULT_INTERVAL)),
+            input_filter='int', multiline=False, font_size='14sp', size_hint_y=None, height=40, size_hint_x=1)
+        self._content.add_widget(self.input_interval)
 
         self._content.add_widget(Label(text="🎨 Цвета", size_hint_y=None, height=35, bold=True, font_size='16sp'))
-        bg_row = BoxLayout(size_hint_y=None, height=40, spacing=10)
-        self.input_bg = TextInput(hint_text="Цвет фона (hex)", text=settings.get('bg_color', DEFAULT_BG_COLOR),
-                                  readonly=True, multiline=False, font_size='14sp')
-        self.btn_bg = Button(text="", background_color=hex_to_rgba(settings.get('bg_color', DEFAULT_BG_COLOR)),
-                             size_hint_x=None, width=50, background_normal='')
-        self.btn_bg.bind(on_release=lambda b: self.open_color_picker('bg'))
-        bg_row.add_widget(self.input_bg)
-        bg_row.add_widget(self.btn_bg)
-        text_row = BoxLayout(size_hint_y=None, height=40, spacing=10)
-        self.input_text = TextInput(hint_text="Цвет текста (hex)", text=settings.get('text_color', DEFAULT_TEXT_COLOR),
-                                    readonly=True, multiline=False, font_size='14sp')
-        self.btn_text = Button(text="", background_color=hex_to_rgba(settings.get('text_color', DEFAULT_TEXT_COLOR)),
-                               size_hint_x=None, width=50, background_normal='')
-        self.btn_text.bind(on_release=lambda b: self.open_color_picker('text'))
-        text_row.add_widget(self.input_text)
-        text_row.add_widget(self.btn_text)
-        self._content.add_widget(bg_row)
-        self._content.add_widget(text_row)
 
-        self._content.add_widget(
-            Label(text="🖼️ Фоновое изображение", size_hint_y=None, height=35, bold=True, font_size='16sp'))
-        self.input_bgimg = TextInput(hint_text="Путь к изображению", text=settings.get('bg_image', ''), readonly=True,
-                                     multiline=False, font_size='14sp', size_hint_y=None, height=40)
+        bg_layout = BoxLayout(size_hint_y=None, height=40, spacing=10)
+        bg_label = Label(text="Фон:", size_hint_x=None, width=60, font_size='14sp')
+        self.input_bg = TextInput(text=settings.get('bg_color', DEFAULT_BG_COLOR),
+            readonly=True, multiline=False, font_size='14sp', size_hint_x=1)
+        self.btn_bg = Button(text="", background_color=hex_to_rgba(settings.get('bg_color', DEFAULT_BG_COLOR)),
+            size_hint_x=None, width=50, background_normal='')
+        self.btn_bg.bind(on_release=lambda b: self.open_color_picker('bg'))
+        bg_layout.add_widget(bg_label)
+        bg_layout.add_widget(self.input_bg)
+        bg_layout.add_widget(self.btn_bg)
+        self._content.add_widget(bg_layout)
+
+        text_layout = BoxLayout(size_hint_y=None, height=40, spacing=10)
+        text_label = Label(text="Текст:", size_hint_x=None, width=60, font_size='14sp')
+        self.input_text = TextInput(text=settings.get('text_color', DEFAULT_TEXT_COLOR),
+            readonly=True, multiline=False, font_size='14sp', size_hint_x=1)
+        self.btn_text = Button(text="", background_color=hex_to_rgba(settings.get('text_color', DEFAULT_TEXT_COLOR)),
+            size_hint_x=None, width=50, background_normal='')
+        self.btn_text.bind(on_release=lambda b: self.open_color_picker('text'))
+        text_layout.add_widget(text_label)
+        text_layout.add_widget(self.input_text)
+        text_layout.add_widget(self.btn_text)
+        self._content.add_widget(text_layout)
+
+        self._content.add_widget(Label(text="🖼️ Фоновое изображение", size_hint_y=None, height=35, bold=True, font_size='16sp'))
+        self.input_bgimg = TextInput(hint_text="Путь к изображению", text=settings.get('bg_image', ''),
+            readonly=True, multiline=False, font_size='14sp', size_hint_y=None, height=40, size_hint_x=1)
         btn_pick = Button(text="📁 Выбрать файл", size_hint_y=None, height=45, font_size='14sp')
         btn_pick.bind(on_release=self.select_image)
         self._content.add_widget(self.input_bgimg)
@@ -472,16 +499,15 @@ class SettingsScreen(Screen):
         self.add_widget(scroll)
 
         for cam in settings.get('cameras', []):
-            self.add_camera_row(None, cam.get('number', ''), cam.get('name', ''), cam.get('header', ''))
+            self.add_camera_row(None, cam.get('number', ''), cam.get('header', ''))
 
     def on_enter(self, *args):
-        """Обновление полей актуальными настройками при входе"""
-        # === УЛУЧШЕНИЕ: защита от None значений ===
         self.input_url.text = settings.get('api_url', DEFAULT_API_URL) or DEFAULT_API_URL
         self.input_user.text = settings.get('user', DEFAULT_USER) or DEFAULT_USER
         self.input_pass.text = settings.get('pass', DEFAULT_PASS) or DEFAULT_PASS
         self.input_interval.text = str(settings.get('interval', DEFAULT_INTERVAL) or DEFAULT_INTERVAL)
         self.input_font.text = str(settings.get('font_size', DEFAULT_FONT_SIZE) or DEFAULT_FONT_SIZE)
+        self.input_header_font.text = str(settings.get('header_font_size', DEFAULT_HEADER_FONT_SIZE) or DEFAULT_HEADER_FONT_SIZE)
         self.input_bg.text = settings.get('bg_color', DEFAULT_BG_COLOR) or DEFAULT_BG_COLOR
         self.input_text.text = settings.get('text_color', DEFAULT_TEXT_COLOR) or DEFAULT_TEXT_COLOR
         self.input_bgimg.text = settings.get('bg_image', DEFAULT_BG_IMAGE) or DEFAULT_BG_IMAGE
@@ -491,36 +517,27 @@ class SettingsScreen(Screen):
         self.camera_container.clear_widgets()
         self.camera_rows.clear()
         for cam in settings.get('cameras', []):
-            self.add_camera_row(None, cam.get('number', ''), cam.get('name', ''), cam.get('header', ''))
+            self.add_camera_row(None, cam.get('number', ''), cam.get('header', ''))
 
-    def add_camera_row(self, instance, number='', name='', header=''):
-        row = BoxLayout(orientation='vertical', size_hint_y=None, height=140, spacing=5, padding=(0, 5))
-        top = BoxLayout(size_hint_y=None, height=40, spacing=5)
-        inp_num = TextInput(hint_text="Номер камеры *", text=number, multiline=False, font_size='14sp',
-                            size_hint_y=None, height=40)
-        inp_name = TextInput(hint_text="Название", text=name, multiline=False, font_size='14sp', size_hint_y=None,
-                             height=40)
-        top.add_widget(inp_num)
-        top.add_widget(inp_name)
-        mid = BoxLayout(size_hint_y=None, height=40, spacing=5)
-        inp_hdr = TextInput(hint_text="Заголовок", text=header, multiline=False, font_size='14sp', size_hint_y=None,
-                            height=40)
-        mid.add_widget(inp_hdr)
-        bottom = BoxLayout(size_hint_y=None, height=40, spacing=5)
-        btn_del = Button(text="✕ Удалить", size_hint_x=None, width=100, font_size='14sp',
-                         background_color=(1, 0.3, 0.3, 1))
+    def add_camera_row(self, instance, number='', header=''):
+        row = BoxLayout(orientation='vertical', size_hint_y=None, height=130, spacing=5, padding=(0, 5))
+        inp_num = TextInput(hint_text="Номер камеры *", text=number, multiline=False,
+            font_size='14sp', size_hint_y=None, height=40, size_hint_x=1)
+        row.add_widget(inp_num)
+        inp_hdr = TextInput(hint_text="Заголовок", text=header, multiline=False,
+            font_size='14sp', size_hint_y=None, height=40, size_hint_x=1)
+        row.add_widget(inp_hdr)
+        btn_del = Button(text="✕ Удалить", size_hint_x=None, width=100,
+            font_size='14sp', background_color=(1, 0.3, 0.3, 1))
         btn_del.bind(on_release=lambda b, r=row: self.remove_camera_row(r))
-        bottom.add_widget(btn_del)
-        row.add_widget(top)
-        row.add_widget(mid)
-        row.add_widget(bottom)
+        row.add_widget(btn_del)
         self.camera_container.add_widget(row)
-        self.camera_rows.append((inp_num, inp_name, inp_hdr, row))
+        self.camera_rows.append((inp_num, inp_hdr, row))
 
     def remove_camera_row(self, row_widget):
         if row_widget in self.camera_container.children:
             self.camera_container.remove_widget(row_widget)
-        self.camera_rows = [(num, name, hdr, row) for num, name, hdr, row in self.camera_rows if row != row_widget]
+        self.camera_rows = [(num, hdr, row) for num, hdr, row in self.camera_rows if row != row_widget]
 
     def open_color_picker(self, target):
         def on_select(hex_val):
@@ -530,7 +547,6 @@ class SettingsScreen(Screen):
             else:
                 self.input_text.text = hex_val
                 self.btn_text.background_color = hex_to_rgba(hex_val)
-
         ColorPickerPopup(on_select).open()
 
     def select_image(self, instance):
@@ -543,12 +559,17 @@ class SettingsScreen(Screen):
                     break
         else:
             start_path = os.path.expanduser('~')
+
         content = BoxLayout(orientation='vertical')
         try:
-            fc = FileChooserListView(path=start_path, filters=['*.png', '*.jpg', '*.jpeg', '*.bmp', '*.gif'],
-                                     filter_dirs=True)
+            fc = FileChooserListView(path=start_path,
+                filters=['*.png', '*.jpg', '*.jpeg', '*.bmp', '*.gif'],
+                filter_dirs=True)
         except:
-            fc = FileChooserListView(path='/', filters=['*.png', '*.jpg', '*.jpeg', '*.bmp', '*.gif'], filter_dirs=True)
+            fc = FileChooserListView(path='/',
+                filters=['*.png', '*.jpg', '*.jpeg', '*.bmp', '*.gif'],
+                filter_dirs=True)
+
         btns = BoxLayout(size_hint_y=None, height=50, spacing=10)
         btn_ok = Button(text="Выбрать")
         btn_cancel = Button(text="Отмена")
@@ -584,25 +605,28 @@ class SettingsScreen(Screen):
 
     def save_settings(self, instance):
         try:
-            # === УЛУЧШЕНИЕ: защита от пустого URL ===
             api_url = self.input_url.text.strip()
             if not api_url:
                 api_url = DEFAULT_API_URL
             settings.set('api_url', api_url)
             settings.set('user', self.input_user.text.strip())
             settings.set('pass', self.input_pass.text.strip())
-            settings.set('interval', max(1,
-                                         int(self.input_interval.text) if self.input_interval.text.strip() else DEFAULT_INTERVAL))
-            settings.set('font_size',
-                         max(10, int(self.input_font.text) if self.input_font.text.strip() else DEFAULT_FONT_SIZE))
+            settings.set('interval', max(1, int(self.input_interval.text) if self.input_interval.text.strip() else DEFAULT_INTERVAL))
+            settings.set('font_size', max(10, int(self.input_font.text) if self.input_font.text.strip() else DEFAULT_FONT_SIZE))
+            settings.set('header_font_size', max(10, int(self.input_header_font.text) if self.input_header_font.text.strip() else DEFAULT_HEADER_FONT_SIZE))
             settings.set('bg_color', self.input_bg.text.strip().lstrip('#'))
             settings.set('text_color', self.input_text.text.strip().lstrip('#'))
             settings.set('bg_image', self.input_bgimg.text.strip())
+
             cameras = []
-            for num, name, hdr, row in self.camera_rows:
+            for num, hdr, row in self.camera_rows:
                 if num.text.strip():
-                    cameras.append({'number': num.text.strip(), 'name': name.text.strip(), 'header': hdr.text.strip()})
-            settings.set('cameras', cameras if cameras else [{'number': '', 'name': '', 'header': ''}])
+                    cameras.append({
+                        'number': num.text.strip(),
+                        'header': hdr.text.strip()
+                    })
+            settings.set('cameras', cameras if cameras else [{'number': '', 'header': ''}])
+
             if settings.save_config():
                 self.lbl_msg.text = "✓ Настройки сохранены!"
                 self.lbl_msg.color = (0, 1, 0, 1)
@@ -615,7 +639,7 @@ class SettingsScreen(Screen):
                             main_screen._apply_bg_settings()
                         else:
                             Clock.schedule_once(lambda dt: main_screen._apply_bg_settings(), 0.05)
-                        main_screen._update_camera_info()
+                        main_screen._fetch_and_schedule()
                 Clock.schedule_once(lambda dt: self.go_back(None), 0.5)
             else:
                 self.lbl_msg.text = "Ошибка сохранения"
